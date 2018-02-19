@@ -11,6 +11,9 @@
 ;(function(window, document) {
   "use strict";
   var pluginName = 'particleground';
+  var particlesRegistry = {};
+  var orientationSupport = !!window.DeviceOrientationEvent;
+  var desktop = !navigator.userAgent.match(/(iPhone|iPod|iPad|Android|BlackBerry|BB10|mobi|tablet|opera mini|nexus 7)/i);
 
   // http://youmightnotneedjquery.com/#deep_extend
   function extend(out) {
@@ -32,12 +35,280 @@
 
   var $ = window.jQuery;
 
+  function Particle(group) {
+    this.group = group
+    this.active = true;
+    this.layer = Math.ceil(Math.random() * 3);
+    this.parallaxOffsetX = 0;
+    this.parallaxOffsetY = 0;
+    this.position = {
+      x: Math.ceil(Math.random() * group.canvas.width),
+      y: Math.ceil(Math.random() * group.canvas.height)
+    }
+    this.speed = {}
+    switch (this.group.directionX) {
+      case 'left':
+        this.speed.x = +(-this.group.maxSpeedX + (Math.random() * this.group.maxSpeedX) - this.group.minSpeedX).toFixed(2);
+        break;
+      case 'right':
+        this.speed.x = +((Math.random() * this.group.maxSpeedX) + this.group.minSpeedX).toFixed(2);
+        break;
+      default:
+        this.speed.x = +((-this.group.maxSpeedX / 2) + (Math.random() * this.group.maxSpeedX)).toFixed(2);
+        this.speed.x += this.speed.x > 0 ? this.group.minSpeedX : -this.group.minSpeedX;
+        break;
+    }
+    switch (this.group.directionY) {
+      case 'up':
+        this.speed.y = +(-this.group.maxSpeedY + (Math.random() * this.group.maxSpeedY) - this.group.minSpeedY).toFixed(2);
+        break;
+      case 'down':
+        this.speed.y = +((Math.random() * this.group.maxSpeedY) + this.group.minSpeedY).toFixed(2);
+        break;
+      default:
+        this.speed.y = +((-this.group.maxSpeedY / 2) + (Math.random() * this.group.maxSpeedY)).toFixed(2);
+        this.speed.x += this.speed.y > 0 ? this.group.minSpeedY : -this.group.minSpeedY;
+        break;
+    }
+  }
+
+  Particle.prototype.setStackPos = function(i) {
+    this.stackPos = i;
+  }
+
+  Particle.prototype.updatePosition = function() {
+    var winW = window.innerWidth;
+    var winH = window.innerHeight;
+    var pointerX = 0;
+    var pointerY = 0;
+    if (this.group.parallax) {
+      if (orientationSupport && !desktop) {
+        // Map tiltX range [-30,30] to range [0,winW]
+        var ratioX = (winW - 0) / (30 - -30);
+        pointerX = (this.group.tiltX - -30) * ratioX + 0;
+        // Map tiltY range [-30,30] to range [0,winH]
+        var ratioY = (winH - 0) / (30 - -30);
+        pointerY = (this.group.tiltY - -30) * ratioY + 0;
+      } else {
+        pointerX = this.group.mouseX;
+        pointerY = this.group.mouseY;
+      }
+      // Calculate parallax offsets
+      this.parallaxTargX = (pointerX - (winW / 2)) / (this.group.parallaxMultiplier * this.layer);
+      this.parallaxOffsetX += (this.parallaxTargX - this.parallaxOffsetX) / 10; // Easing equation
+      this.parallaxTargY = (pointerY - (winH / 2)) / (this.group.parallaxMultiplier * this.layer);
+      this.parallaxOffsetY += (this.parallaxTargY - this.parallaxOffsetY) / 10; // Easing equation
+    }
+
+    var elWidth = this.group.element.offsetWidth;
+    var elHeight = this.group.element.offsetHeight;
+
+    switch (this.group.directionX) {
+      case 'left':
+        if (this.position.x + this.speed.x + this.parallaxOffsetX < 0) {
+          this.position.x = elWidth - this.parallaxOffsetX;
+        }
+        break;
+      case 'right':
+        if (this.position.x + this.speed.x + this.parallaxOffsetX > elWidth) {
+          this.position.x = 0 - this.parallaxOffsetX;
+        }
+        break;
+      default:
+        // If particle has reached edge of canvas, reverse its direction
+        if (this.position.x + this.speed.x + this.parallaxOffsetX > elWidth || this.position.x + this.speed.x + this.parallaxOffsetX < 0) {
+          this.speed.x = -this.speed.x;
+        }
+        break;
+    }
+
+    switch (this.group.directionY) {
+      case 'up':
+        if (this.position.y + this.speed.y + this.parallaxOffsetY < 0) {
+          this.position.y = elHeight - this.parallaxOffsetY;
+        }
+        break;
+      case 'down':
+        if (this.position.y + this.speed.y + this.parallaxOffsetY > elHeight) {
+          this.position.y = 0 - this.parallaxOffsetY;
+        }
+        break;
+      default:
+        // If particle has reached edge of canvas, reverse its direction
+        if (this.position.y + this.speed.y + this.parallaxOffsetY > elHeight || this.position.y + this.speed.y + this.parallaxOffsetY < 0) {
+          this.speed.y = -this.speed.y;
+        }
+        break;
+    }
+
+    // Move particle
+    this.position.x += this.speed.x;
+    this.position.y += this.speed.y;
+  }
+
+  Particle.prototype.draw = function() {
+    // Draw circle
+    this.group.ctx.beginPath();
+    this.group.ctx.arc(this.position.x + this.parallaxOffsetX, this.position.y + this.parallaxOffsetY, this.group.particleRadius / 2, 0, Math.PI * 2, true);
+    this.group.ctx.closePath();
+    this.group.ctx.fill();
+
+    // Draw lines
+    this.group.ctx.beginPath();
+    // Iterate over all particles which are higher in the stack than this one
+    for (var i = this.group.particles.length - 1; i > this.stackPos; i--) {
+      var p2 = this.group.particles[i];
+
+      // Pythagorus theorum to get distance between two points
+      var a = this.position.x - p2.position.x
+      var b = this.position.y - p2.position.y
+      var dist = Math.sqrt((a * a) + (b * b)).toFixed(2);
+
+      // If the two particles are in proximity, join them
+      if (dist < this.group.proximity) {
+        this.group.ctx.moveTo(this.position.x + this.parallaxOffsetX, this.position.y + this.parallaxOffsetY);
+        if (this.group.curvedLines) {
+          this.group.ctx.quadraticCurveTo(Math.max(p2.position.x, p2.position.x), Math.min(p2.position.y, p2.position.y), p2.position.x + p2.parallaxOffsetX, p2.position.y + p2.parallaxOffsetY);
+        } else {
+          this.group.ctx.lineTo(p2.position.x + p2.parallaxOffsetX, p2.position.y + p2.parallaxOffsetY);
+        }
+      }
+    }
+    this.group.ctx.stroke();
+    this.group.ctx.closePath();
+  }
+
+  ParticleGround.prototype.__initialize__ = function() {
+    this.particles = [];
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'pg-canvas'; // need to make this unique
+    this.canvas.style.display = 'block';
+    this.element.insertBefore(this.canvas, this.element.firstChild);
+    this.ctx = this.canvas.getContext('2d');
+    this.__apply_canvas_style__();
+
+    // Create particles
+    var numParticles = Math.round((this.canvas.width * this.canvas.height) / this.density);
+    for (var i = 0; i < numParticles; i++) {
+      var p = new Particle(this);
+      p.setStackPos(i);
+      this.particles.push(p);
+    };
+
+    window.addEventListener('resize', this.resize, false);
+
+    document.addEventListener('mousemove', function(e) {
+      this.mouseX = e.pageX;
+      this.mouseY = e.pageY;
+    }, false);
+
+    if (orientationSupport && !desktop) {
+      window.addEventListener('deviceorientation', function () {
+        // Contrain tilt range to [-30,30]
+        this.tiltY = Math.min(Math.max(-event.beta, -30), 30);
+        this.tiltX = Math.min(Math.max(-event.gamma, -30), 30);
+      }, true);
+    }
+    this.start()
+  }
+
+  ParticleGround.prototype.__apply_canvas_style__ = function() {
+    this.canvas.width = this.element.offsetWidth;
+    this.canvas.height = this.element.offsetHeight;
+    this.ctx.fillStyle = this.dotColor;
+    this.ctx.strokeStyle = this.lineColor;
+    this.ctx.lineWidth = this.lineWidth;
+  }
+
+  ParticleGround.prototype.draw = function() {
+console.log("draw");
+    var winW = window.innerWidth;
+    var winH = window.innerHeight;
+
+    // Wipe canvas
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Update particle positions
+    for (var i = 0; i < this.particles.length; i++) {
+      this.particles[i].updatePosition();
+    };
+    // Draw particles
+    for (var i = 0; i < this.particles.length; i++) {
+      this.particles[i].draw();
+    };
+
+    // Call this function next time screen is redrawn
+    if (this.paused) {
+      this.__cancel_animation__();
+    } else {
+      this.__animate__();
+    }
+  }
+
+  ParticleGround.prototype.start = function() {
+    this.paused = false;
+    this.__animate__();
+  }
+
+  ParticleGround.prototype.__animate__ = function() {
+    this.call_count++;
+    var pg = this
+    pg.raf = requestAnimationFrame(function(){ pg.draw() });
+  }
+
+  ParticleGround.prototype.__cancel_animation__ = function() {
+    cancelAnimationFrame(this.raf);
+  }
+
+  ParticleGround.prototype.resize = function() {
+      this.__apply_canvas_style__();
+
+      var elWidth = this.element.offsetWidth;
+      var elHeight = this.element.offsetHeight;
+
+      // Remove particles that are outside the canvas
+      for (var i = this.particles.length - 1; i >= 0; i--) {
+        if (this.particles[i].position.x > elWidth || this.particles[i].position.y > elHeight) {
+          this.particles.splice(i, 1);
+        }
+      };
+
+      // Adjust particle density
+      var numParticles = Math.round((this.canvas.width * this.canvas.height) / this.density);
+      if (numParticles > this.particles.length) {
+        while (numParticles > this.particles.length) {
+          var p = new Particle();
+          this.particles.push(p);
+        }
+      } else if (numParticles < this.particles.length) {
+        this.particles.splice(numParticles);
+      }
+
+      // Re-index particles
+      for (i = this.particles.length - 1; i >= 0; i--) {
+        this.particles[i].setStackPos(i);
+      };
+    }
+
+  ParticleGround.prototype.pause = function() {
+      this.paused = true
+      this.__cancel_animation__()
+    }
+
+  function ParticleGround(element, options) {
+    extend(this, window[pluginName].defaults, options);
+    this.element = element
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.__initialize__()
+  }
+
+  var initialized = false;
   function Plugin(element, options) {
     var canvasSupport = !!document.createElement('canvas').getContext;
     var canvas;
     var ctx;
     var particles = [];
-    var raf;
     var mouseX = 0;
     var mouseY = 0;
     var winW;
@@ -56,300 +327,9 @@
      * Init
      */
     function init() {
+      if (initialized) { return }
       if (!canvasSupport) { return; }
-
-      //Create canvas
-      canvas = document.createElement('canvas');
-      canvas.className = 'pg-canvas';
-      canvas.style.display = 'block';
-      element.insertBefore(canvas, element.firstChild);
-      ctx = canvas.getContext('2d');
-      styleCanvas();
-
-      // Create particles
-      var numParticles = Math.round((canvas.width * canvas.height) / options.density);
-      for (var i = 0; i < numParticles; i++) {
-        var p = new Particle();
-        p.setStackPos(i);
-        particles.push(p);
-      };
-
-      window.addEventListener('resize', function() {
-        resizeHandler();
-      }, false);
-
-      document.addEventListener('mousemove', function(e) {
-        mouseX = e.pageX;
-        mouseY = e.pageY;
-      }, false);
-
-      if (orientationSupport && !desktop) {
-        window.addEventListener('deviceorientation', function () {
-          // Contrain tilt range to [-30,30]
-          tiltY = Math.min(Math.max(-event.beta, -30), 30);
-          tiltX = Math.min(Math.max(-event.gamma, -30), 30);
-        }, true);
-      }
-
-      draw();
       hook('onInit');
-    }
-
-    /**
-     * Style the canvas
-     */
-    function styleCanvas() {
-      canvas.width = element.offsetWidth;
-      canvas.height = element.offsetHeight;
-      ctx.fillStyle = options.dotColor;
-      ctx.strokeStyle = options.lineColor;
-      ctx.lineWidth = options.lineWidth;
-    }
-
-    /**
-     * Draw particles
-     */
-    function draw() {
-      if (!canvasSupport) { return; }
-
-      winW = window.innerWidth;
-      winH = window.innerHeight;
-
-      // Wipe canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Update particle positions
-      for (var i = 0; i < particles.length; i++) {
-        particles[i].updatePosition();
-      };
-      // Draw particles
-      for (var i = 0; i < particles.length; i++) {
-        particles[i].draw();
-      };
-
-      // Call this function next time screen is redrawn
-      if (!paused) {
-        raf = requestAnimationFrame(draw);
-      }
-    }
-
-    /**
-     * Add/remove particles.
-     */
-    function resizeHandler() {
-      // Resize the canvas
-      styleCanvas();
-
-      var elWidth = element.offsetWidth;
-      var elHeight = element.offsetHeight;
-
-      // Remove particles that are outside the canvas
-      for (var i = particles.length - 1; i >= 0; i--) {
-        if (particles[i].position.x > elWidth || particles[i].position.y > elHeight) {
-          particles.splice(i, 1);
-        }
-      };
-
-      // Adjust particle density
-      var numParticles = Math.round((canvas.width * canvas.height) / options.density);
-      if (numParticles > particles.length) {
-        while (numParticles > particles.length) {
-          var p = new Particle();
-          particles.push(p);
-        }
-      } else if (numParticles < particles.length) {
-        particles.splice(numParticles);
-      }
-
-      // Re-index particles
-      for (i = particles.length - 1; i >= 0; i--) {
-        particles[i].setStackPos(i);
-      };
-    }
-
-    /**
-     * Pause particle system
-     */
-    function pause() {
-      paused = true;
-    }
-
-    /**
-     * Start particle system
-     */
-    function start() {
-      paused = false;
-      draw();
-    }
-
-    /**
-     * Particle
-     */
-    function Particle() {
-      this.stackPos;
-      this.active = true;
-      this.layer = Math.ceil(Math.random() * 3);
-      this.parallaxOffsetX = 0;
-      this.parallaxOffsetY = 0;
-      // Initial particle position
-      this.position = {
-        x: Math.ceil(Math.random() * canvas.width),
-        y: Math.ceil(Math.random() * canvas.height)
-      }
-      // Random particle speed, within min and max values
-      this.speed = {}
-      switch (options.directionX) {
-        case 'left':
-          this.speed.x = +(-options.maxSpeedX + (Math.random() * options.maxSpeedX) - options.minSpeedX).toFixed(2);
-          break;
-        case 'right':
-          this.speed.x = +((Math.random() * options.maxSpeedX) + options.minSpeedX).toFixed(2);
-          break;
-        default:
-          this.speed.x = +((-options.maxSpeedX / 2) + (Math.random() * options.maxSpeedX)).toFixed(2);
-          this.speed.x += this.speed.x > 0 ? options.minSpeedX : -options.minSpeedX;
-          break;
-      }
-      switch (options.directionY) {
-        case 'up':
-          this.speed.y = +(-options.maxSpeedY + (Math.random() * options.maxSpeedY) - options.minSpeedY).toFixed(2);
-          break;
-        case 'down':
-          this.speed.y = +((Math.random() * options.maxSpeedY) + options.minSpeedY).toFixed(2);
-          break;
-        default:
-          this.speed.y = +((-options.maxSpeedY / 2) + (Math.random() * options.maxSpeedY)).toFixed(2);
-          this.speed.x += this.speed.y > 0 ? options.minSpeedY : -options.minSpeedY;
-          break;
-      }
-    }
-
-    /**
-     * Draw particle
-     */
-    Particle.prototype.draw = function() {
-      // Draw circle
-      ctx.beginPath();
-      ctx.arc(this.position.x + this.parallaxOffsetX, this.position.y + this.parallaxOffsetY, options.particleRadius / 2, 0, Math.PI * 2, true);
-      ctx.closePath();
-      ctx.fill();
-
-      // Draw lines
-      ctx.beginPath();
-      // Iterate over all particles which are higher in the stack than this one
-      for (var i = particles.length - 1; i > this.stackPos; i--) {
-        var p2 = particles[i];
-
-        // Pythagorus theorum to get distance between two points
-        var a = this.position.x - p2.position.x
-        var b = this.position.y - p2.position.y
-        var dist = Math.sqrt((a * a) + (b * b)).toFixed(2);
-
-        // If the two particles are in proximity, join them
-        if (dist < options.proximity) {
-          ctx.moveTo(this.position.x + this.parallaxOffsetX, this.position.y + this.parallaxOffsetY);
-          if (options.curvedLines) {
-            ctx.quadraticCurveTo(Math.max(p2.position.x, p2.position.x), Math.min(p2.position.y, p2.position.y), p2.position.x + p2.parallaxOffsetX, p2.position.y + p2.parallaxOffsetY);
-          } else {
-            ctx.lineTo(p2.position.x + p2.parallaxOffsetX, p2.position.y + p2.parallaxOffsetY);
-          }
-        }
-      }
-      ctx.stroke();
-      ctx.closePath();
-    }
-
-    /**
-     * update particle position
-     */
-    Particle.prototype.updatePosition = function() {
-      if (options.parallax) {
-        if (orientationSupport && !desktop) {
-          // Map tiltX range [-30,30] to range [0,winW]
-          var ratioX = (winW - 0) / (30 - -30);
-          pointerX = (tiltX - -30) * ratioX + 0;
-          // Map tiltY range [-30,30] to range [0,winH]
-          var ratioY = (winH - 0) / (30 - -30);
-          pointerY = (tiltY - -30) * ratioY + 0;
-        } else {
-          pointerX = mouseX;
-          pointerY = mouseY;
-        }
-        // Calculate parallax offsets
-        this.parallaxTargX = (pointerX - (winW / 2)) / (options.parallaxMultiplier * this.layer);
-        this.parallaxOffsetX += (this.parallaxTargX - this.parallaxOffsetX) / 10; // Easing equation
-        this.parallaxTargY = (pointerY - (winH / 2)) / (options.parallaxMultiplier * this.layer);
-        this.parallaxOffsetY += (this.parallaxTargY - this.parallaxOffsetY) / 10; // Easing equation
-      }
-
-      var elWidth = element.offsetWidth;
-      var elHeight = element.offsetHeight;
-
-      switch (options.directionX) {
-        case 'left':
-          if (this.position.x + this.speed.x + this.parallaxOffsetX < 0) {
-            this.position.x = elWidth - this.parallaxOffsetX;
-          }
-          break;
-        case 'right':
-          if (this.position.x + this.speed.x + this.parallaxOffsetX > elWidth) {
-            this.position.x = 0 - this.parallaxOffsetX;
-          }
-          break;
-        default:
-          // If particle has reached edge of canvas, reverse its direction
-          if (this.position.x + this.speed.x + this.parallaxOffsetX > elWidth || this.position.x + this.speed.x + this.parallaxOffsetX < 0) {
-            this.speed.x = -this.speed.x;
-          }
-          break;
-      }
-
-      switch (options.directionY) {
-        case 'up':
-          if (this.position.y + this.speed.y + this.parallaxOffsetY < 0) {
-            this.position.y = elHeight - this.parallaxOffsetY;
-          }
-          break;
-        case 'down':
-          if (this.position.y + this.speed.y + this.parallaxOffsetY > elHeight) {
-            this.position.y = 0 - this.parallaxOffsetY;
-          }
-          break;
-        default:
-          // If particle has reached edge of canvas, reverse its direction
-          if (this.position.y + this.speed.y + this.parallaxOffsetY > elHeight || this.position.y + this.speed.y + this.parallaxOffsetY < 0) {
-            this.speed.y = -this.speed.y;
-          }
-          break;
-      }
-
-      // Move particle
-      this.position.x += this.speed.x;
-      this.position.y += this.speed.y;
-    }
-
-    /**
-     * Setter: particle stacking position
-     */
-    Particle.prototype.setStackPos = function(i) {
-      this.stackPos = i;
-    }
-
-    function option (key, val) {
-      if (val) {
-        options[key] = val;
-      } else {
-        return options[key];
-      }
-    }
-
-    function destroy() {
-      console.log('destroy');
-      canvas.parentNode.removeChild(canvas);
-      hook('onDestroy');
-      if ($) {
-        $(element).removeData('plugin_' + pluginName);
-      }
     }
 
     function hook(hookName) {
@@ -359,13 +339,7 @@
     }
 
     init();
-
-    return {
-      option: option,
-      destroy: destroy,
-      start: start,
-      pause: pause
-    };
+    return new ParticleGround(element, options)
   }
 
   window[pluginName] = function(elem, options) {
