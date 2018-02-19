@@ -1,7 +1,3 @@
-**IMPORTANT** This repository is no longer maintained. If anyone wants to continue work on Particleground I recommend creating your own fork. Thanks to those who contrinuted to this project.
-
-<hr>
-
 Particleground
 ==============
 
@@ -16,6 +12,11 @@ A JavaScript plugin for snazzy background particle systems. Includes an optional
 jQuery:
 
     $('#your-element').particleground();
+
+Once initialized, you may access the object by storing the return value of the result of above functions, or via `getParticleGround()` function:
+
+   var pg = particleground(...);
+   var pg = getParticleGround(document.getElementById('your-element'));
 
 ## Options
 
