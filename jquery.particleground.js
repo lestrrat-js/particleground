@@ -180,7 +180,7 @@
   ParticleGround.prototype.__initialize__ = function() {
     this.particles = [];
     this.canvas = document.createElement('canvas');
-    this.canvas.className = 'pg-canvas'; // need to make this unique
+    this.canvas.className = 'pg-canvas';
     this.canvas.style.display = 'block';
     this.element.insertBefore(this.canvas, this.element.firstChild);
     this.ctx = this.canvas.getContext('2d');
