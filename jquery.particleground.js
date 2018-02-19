@@ -11,7 +11,6 @@
 ;(function(window, document) {
   "use strict";
   var pluginName = 'particleground';
-  var particlesRegistry = {};
   var orientationSupport = !!window.DeviceOrientationEvent;
   var desktop = !navigator.userAgent.match(/(iPhone|iPod|iPad|Android|BlackBerry|BB10|mobi|tablet|opera mini|nexus 7)/i);
 
@@ -185,6 +184,7 @@
     this.canvas.style.display = 'block';
     this.element.insertBefore(this.canvas, this.element.firstChild);
     this.ctx = this.canvas.getContext('2d');
+    this.hooks = {};
     this.__apply_canvas_style__();
 
     // Create particles
@@ -209,7 +209,15 @@
         this.tiltX = Math.min(Math.max(-event.gamma, -30), 30);
       }, true);
     }
+
+    this.__run_hook__('onInit');
     this.start()
+  }
+
+  ParticleGround.prototype.__run_hook__ = function(name) {
+    if (this.hooks[name] !== undefined) {
+      this.hooks[name].call(this);
+    }
   }
 
   ParticleGround.prototype.__apply_canvas_style__ = function() {
@@ -249,6 +257,15 @@ console.log("draw");
     this.paused = false;
     this.__animate__();
   }
+
+  ParticleGround.prototype.destroy = function() {
+    this.pause();
+    if ($) {
+       $(this.element).removeData('plugin_' + pluginName);
+    }
+  }
+
+    
 
   ParticleGround.prototype.__animate__ = function() {
     this.call_count++;
@@ -303,42 +320,14 @@ console.log("draw");
     this.__initialize__()
   }
 
-  var initialized = false;
   function Plugin(element, options) {
     var canvasSupport = !!document.createElement('canvas').getContext;
-    var canvas;
-    var ctx;
-    var particles = [];
-    var mouseX = 0;
-    var mouseY = 0;
-    var winW;
-    var winH;
-    var desktop = !navigator.userAgent.match(/(iPhone|iPod|iPad|Android|BlackBerry|BB10|mobi|tablet|opera mini|nexus 7)/i);
-    var orientationSupport = !!window.DeviceOrientationEvent;
-    var tiltX = 0;
-    var pointerX;
-    var pointerY;
-    var tiltY = 0;
-    var paused = false;
-
     options = extend({}, window[pluginName].defaults, options);
 
-    /**
-     * Init
-     */
-    function init() {
-      if (initialized) { return }
-      if (!canvasSupport) { return; }
-      hook('onInit');
+    if (!canvasSupport) {
+      return;
     }
 
-    function hook(hookName) {
-      if (options[hookName] !== undefined) {
-        options[hookName].call(element);
-      }
-    }
-
-    init();
     return new ParticleGround(element, options)
   }
 
@@ -362,8 +351,6 @@ console.log("draw");
     proximity: 100, // How close two dots need to be before they join
     parallax: true,
     parallaxMultiplier: 5, // The lower the number, the more extreme the parallax effect
-    onInit: function() {},
-    onDestroy: function() {}
   };
 
   // nothing wrong with hooking into jQuery if it's there...
