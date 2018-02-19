@@ -11,6 +11,7 @@
 ;(function(window, document) {
   "use strict";
   var pluginName = 'particleground';
+  var particleRegistry = {};
   var orientationSupport = !!window.DeviceOrientationEvent;
   var desktop = !navigator.userAgent.match(/(iPhone|iPod|iPad|Android|BlackBerry|BB10|mobi|tablet|opera mini|nexus 7)/i);
 
@@ -229,7 +230,6 @@
   }
 
   ParticleGround.prototype.draw = function() {
-console.log("draw");
     var winW = window.innerWidth;
     var winH = window.innerHeight;
 
@@ -259,6 +259,7 @@ console.log("draw");
   }
 
   ParticleGround.prototype.destroy = function() {
+    delete particleRegistry[this.element];
     this.pause();
     if ($) {
        $(this.element).removeData('plugin_' + pluginName);
@@ -320,6 +321,10 @@ console.log("draw");
     this.__initialize__()
   }
 
+  window.getParticleGround = function(element) {
+    return particleRegistry[element];
+  }
+
   function Plugin(element, options) {
     var canvasSupport = !!document.createElement('canvas').getContext;
     options = extend({}, window[pluginName].defaults, options);
@@ -328,7 +333,9 @@ console.log("draw");
       return;
     }
 
-    return new ParticleGround(element, options)
+    var pg = new ParticleGround(element, options)
+    particleRegistry[element] = pg;
+    return pg;
   }
 
   window[pluginName] = function(elem, options) {
